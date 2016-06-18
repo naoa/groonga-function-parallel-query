@@ -183,6 +183,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
   pthread_t threads[n_worker]; /* should be malloc */
   thread_query_args qa[n_worker]; 
   grn_operator merge_op = GRN_OP_OR;
+  grn_bool is_first = GRN_TRUE;
 
   if (nargs < 2) {
     GRN_PLUGIN_ERROR(ctx, GRN_INVALID_ARGUMENT,
@@ -191,12 +192,6 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
     goto exit;
   }
 #define QUERY_SET_SIZE 2
-  if (nargs / QUERY_SET_SIZE > n_worker) {
-    GRN_PLUGIN_ERROR(ctx, GRN_INVALID_ARGUMENT,
-                     "arguments exceed n_worker (%d)", n_worker);
-    rc = ctx->rc;
-    goto exit;
-  }
   if (nargs > 2 && nargs % QUERY_SET_SIZE) {
     if (GRN_TEXT_LEN(args[nargs - 1]) >= 2 &&
         !memcmp(GRN_TEXT_VALUE(args[nargs - 1]), "OR", 2)) {
@@ -220,7 +215,12 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
     qa[n].res = res;
     qa[n].match_columns_string = args[i];
     qa[n].query = args[i + 1];
-    qa[n].op = n == 0 ? op : merge_op;
+    if (is_first) {
+      qa[n].op = op;
+      is_first = GRN_FALSE;
+    } else {
+      qa[n].op = merge_op;
+    }
     qa[n].main = n == 0 ? GRN_TRUE : GRN_FALSE;
     ret = pthread_create(&threads[n], NULL, (void *)thread_query, (void *) &qa[n]);
     if (ret != 0) {

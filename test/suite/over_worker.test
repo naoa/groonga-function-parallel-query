@@ -1,0 +1,22 @@
+#$GRN_PARALLEL_QUERY_N_WORKER=2
+
+plugin_register functions/parallel_query
+
+table_create Users TABLE_NO_KEY
+column_create Users name COLUMN_SCALAR ShortText
+
+table_create Lexicon TABLE_HASH_KEY ShortText \
+  --default_tokenizer TokenBigramSplitSymbolAlphaDigit \
+  --normalizer NormalizerAuto
+column_create Lexicon users_name COLUMN_INDEX|WITH_POSITION Users name
+
+load --table Users
+[
+{"name": "Alice"},
+{"name": "Alisa"},
+{"name": "Bob"}
+]
+
+select Users \
+  --output_columns name,_score \
+  --filter 'parallel_query("name * 10", "alice", "name * 5", "alisa", "name * 3", "bob")'
