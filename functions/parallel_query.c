@@ -27,8 +27,6 @@
 # define GNUC_UNUSED
 #endif
 
-#define MAX_WORKER 32
-grn_ctx q_ctx[MAX_WORKER];
 int n_worker = 8;
 
 pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
@@ -274,12 +272,6 @@ GRN_PLUGIN_INIT(GNUC_UNUSED grn_ctx *ctx)
                GRN_ENV_BUFFER_SIZE);
     if (grn_parallel_query_n_worker_env[0]) {
       n_worker = atoi(grn_parallel_query_n_worker_env);
-      if (n_worker > MAX_WORKER) {
-        n_worker = MAX_WORKER;
-        GRN_PLUGIN_LOG(ctx, GRN_LOG_WARNING,
-                       "[parallel_query] exceed n_worker = %d. set n_worker = %d",
-                       n_worker, MAX_WORKER);
-      }
     }
   }
   return GRN_SUCCESS;
