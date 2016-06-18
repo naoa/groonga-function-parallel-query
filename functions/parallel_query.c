@@ -48,7 +48,7 @@ typedef struct {
 /* lib/grn_rset.h */
 
 typedef struct {
-  grn_ctx *ctx;
+  grn_obj *db;
   grn_obj *table;
   grn_obj *res;
   grn_obj *match_columns_string;
@@ -61,7 +61,8 @@ static void*
 thread_query(void *p)
 {
   thread_query_args *ip = (thread_query_args *)p;
-  grn_ctx *ctx = ip->ctx;
+  grn_ctx ctx_;
+  grn_ctx *ctx = &ctx_;
   grn_obj *table = ip->table;
   grn_obj *res = ip->res;
   grn_obj *match_columns_string = ip->match_columns_string;
@@ -73,6 +74,9 @@ thread_query(void *p)
   grn_obj *dummy_variable;
   grn_obj *thread_res = NULL;
   int ret;
+
+  grn_ctx_init(ctx, 0);
+  grn_ctx_use(ctx, ip->db);
 
   if (match_columns_string->header.domain == GRN_DB_TEXT &&
       GRN_TEXT_LEN(match_columns_string) > 0) {
@@ -167,6 +171,7 @@ exit :
   if (thread_res) {
     grn_obj_unlink(ctx, thread_res);
   }
+  grn_ctx_fin(ctx);
   /* should be return error code */
   pthread_exit(NULL);
 }
@@ -184,6 +189,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
   thread_query_args qa[n_worker]; 
   grn_operator merge_op = GRN_OP_OR;
   grn_bool is_first = GRN_TRUE;
+  grn_obj *db = grn_ctx_db(ctx);
 
   if (nargs < 2) {
     GRN_PLUGIN_ERROR(ctx, GRN_INVALID_ARGUMENT,
@@ -210,7 +216,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
   }
 
   for (i = 0; i + QUERY_SET_SIZE <= n_query_args; i += QUERY_SET_SIZE) {
-    qa[n].ctx = &q_ctx[n];
+    qa[n].db = db;
     qa[n].table = table;
     qa[n].res = res;
     qa[n].match_columns_string = args[i];
@@ -276,10 +282,6 @@ GRN_PLUGIN_INIT(GNUC_UNUSED grn_ctx *ctx)
       }
     }
   }
-  for (i = 0; i < n_worker; i++) {
-    grn_ctx_init(&q_ctx[i], 0);
-    grn_ctx_use(&q_ctx[i], grn_ctx_db(ctx));
-  }
   return GRN_SUCCESS;
 }
 
@@ -299,9 +301,5 @@ GRN_PLUGIN_REGISTER(grn_ctx *ctx)
 grn_rc
 GRN_PLUGIN_FIN(GNUC_UNUSED grn_ctx *ctx)
 {
-  int i;
-  for (i = 0; i < n_worker; i++) {
-    grn_ctx_fin(&q_ctx[i]);
-  }
   return GRN_SUCCESS;
 }
