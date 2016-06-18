@@ -263,7 +263,6 @@ selector_parallel_query(grn_ctx *ctx, GNUC_UNUSED grn_obj *table, GNUC_UNUSED gr
 grn_rc
 GRN_PLUGIN_INIT(GNUC_UNUSED grn_ctx *ctx)
 {
-  int i;
   {
     char grn_parallel_query_n_worker_env[GRN_ENV_BUFFER_SIZE];
 
