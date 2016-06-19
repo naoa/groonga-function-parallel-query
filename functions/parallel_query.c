@@ -49,10 +49,8 @@ typedef struct {
   grn_obj *db;
   grn_obj *table;
   grn_obj *res;
-  const char *match_columns_string;
-  unsigned int match_columns_string_length;
-  const char *query_string;
-  unsigned int query_string_length;
+  grn_obj *match_columns_string;
+  grn_obj *query;
   grn_operator op;
   grn_bool main;
 } thread_query_args;
@@ -65,10 +63,8 @@ thread_query(void *p)
   grn_ctx *ctx = &ctx_;
   grn_obj *table = ip->table;
   grn_obj *res = ip->res;
-  const char *match_columns_string = ip->match_columns_string;
-  unsigned int match_columns_string_length = ip->match_columns_string_length;
-  const char *query_string = ip->query_string;
-  unsigned int query_string_length = ip->query_string_length;
+  grn_obj *match_columns_string = ip->match_columns_string;
+  grn_obj *query = ip->query;
   grn_operator op = ip->op;
   grn_rc rc = GRN_SUCCESS;
   grn_obj *match_columns = NULL;
@@ -83,7 +79,8 @@ thread_query(void *p)
   }
   grn_ctx_use(ctx, ip->db);
 
-  if (match_columns_string_length > 0) {
+  if (match_columns_string->header.domain == GRN_DB_TEXT &&
+      GRN_TEXT_LEN(match_columns_string) > 0) {
     GRN_EXPR_CREATE_FOR_QUERY(ctx, table, match_columns, dummy_variable);
     if (!match_columns) {
       rc = ctx->rc;
@@ -91,8 +88,8 @@ thread_query(void *p)
     }
 
     grn_expr_parse(ctx, match_columns,
-                   match_columns_string,
-                   match_columns_string_length,
+                   GRN_TEXT_VALUE(match_columns_string),
+                   GRN_TEXT_LEN(match_columns_string),
                    NULL, GRN_OP_MATCH, GRN_OP_AND,
                    GRN_EXPR_SYNTAX_SCRIPT);
     if (ctx->rc != GRN_SUCCESS) {
@@ -101,7 +98,9 @@ thread_query(void *p)
     }
   }
 
-  if (query_string_length > 0) {
+  if (query->header.domain == GRN_DB_TEXT && GRN_TEXT_LEN(query) > 0) {
+    const char *query_string;
+    unsigned int query_string_len;
     grn_expr_flags flags =
       GRN_EXPR_SYNTAX_QUERY|GRN_EXPR_ALLOW_PRAGMA|GRN_EXPR_ALLOW_COLUMN;
 
@@ -111,9 +110,12 @@ thread_query(void *p)
       goto exit;
     }
 
+    query_string = GRN_TEXT_VALUE(query);
+    query_string_len = GRN_TEXT_LEN(query);
+
     grn_expr_parse(ctx, condition,
                    query_string,
-                   query_string_length,
+                   query_string_len,
                    match_columns, GRN_OP_MATCH, GRN_OP_AND, flags);
     rc = ctx->rc;
     if (rc != GRN_SUCCESS) {
@@ -191,8 +193,6 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
   grn_obj *db = grn_ctx_db(ctx);
   grn_bool use_merge_res = GRN_FALSE;
   grn_obj *merge_res = NULL;
-  grn_obj queries;
-  GRN_TEXT_INIT(&queries, GRN_OBJ_VECTOR);
 
   if (nargs < 2) {
     GRN_PLUGIN_ERROR(ctx, GRN_INVALID_ARGUMENT,
@@ -231,50 +231,11 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
   }
 
   for (i = 0; i + QUERY_SET_SIZE <= n_query_args; i += QUERY_SET_SIZE) {
-    if ((args[i]->header.domain == GRN_DB_TEXT && GRN_TEXT_LEN(args[i]) > 0) &&
-        (args[i + 1]->header.domain == GRN_DB_TEXT && GRN_TEXT_LEN(args[i + 1]) > 0)) {
-#define ADD(match_columns_, match_columns_length_, query_, query_length_)   \
-  grn_vector_add_element(ctx, &queries,                                     \
-                         match_columns_, match_columns_length_,             \
-                         0, GRN_DB_TEXT);                                   \
-  grn_vector_add_element(ctx, &queries,                                     \
-                         query_, query_length_,                             \
-                         0, GRN_DB_TEXT)
-
-      const char *s = GRN_TEXT_VALUE(args[i]);
-      const char *e = GRN_BULK_CURR(args[i]);
-      const char *p, *last_pipe = s;
-      unsigned int cl = 0;
-      grn_bool have_pipe = GRN_FALSE;
-      for (p = s; p < e && (cl = grn_charlen(ctx, p, e)); p += cl) {
-        if (e - p >= 2 && !memcmp(p, "||", 2) ) {
-          ADD(last_pipe, p - last_pipe, GRN_TEXT_VALUE(args[i + 1]), GRN_TEXT_LEN(args[i + 1]));
-          last_pipe = p + 2;
-          have_pipe = GRN_TRUE;
-        }
-      }
-      if (have_pipe) {
-        ADD(last_pipe, e - last_pipe, GRN_TEXT_VALUE(args[i + 1]), GRN_TEXT_LEN(args[i + 1]));
-      } else {
-        ADD(GRN_TEXT_VALUE(args[i]), GRN_TEXT_LEN(args[i]),
-            GRN_TEXT_VALUE(args[i + 1]), GRN_TEXT_LEN(args[i + 1]));
-      }
-    }
-  }
-
-  n_query_args = grn_vector_size(ctx, &queries);
-
-  for (i = 0; i + QUERY_SET_SIZE <= n_query_args; i += QUERY_SET_SIZE) {
     qa[n].db = db;
     qa[n].table = table;
     qa[n].res = use_merge_res ? merge_res : res;
-    qa[n].match_columns_string_length =
-      grn_vector_get_element(ctx, &queries, i,
-                              &(qa[n].match_columns_string), NULL, NULL);
-    qa[n].query_string_length =
-      grn_vector_get_element(ctx, &queries, i + 1,
-                              &(qa[n].query_string), NULL, NULL);
-
+    qa[n].match_columns_string = args[i];
+    qa[n].query = args[i + 1];
     if (is_first && !use_merge_res) {
       qa[n].op = op;
       is_first = GRN_FALSE;
@@ -313,8 +274,6 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
 #undef QUERY_SET_SIZE
 
 exit :
-
-  GRN_OBJ_FIN(ctx, &queries);
 
   if (merge_res) {
     grn_obj_unlink(ctx, merge_res);
