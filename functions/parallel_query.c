@@ -73,7 +73,10 @@ thread_query(void *p)
   grn_obj *thread_res = NULL;
   int ret;
 
-  grn_ctx_init(ctx, 0);
+  rc = grn_ctx_init(ctx, 0);
+  if (rc != GRN_SUCCESS) {
+    goto exit;
+  }
   grn_ctx_use(ctx, ip->db);
 
   if (match_columns_string->header.domain == GRN_DB_TEXT &&
@@ -242,7 +245,9 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
     qa[n].main = n == 0 ? GRN_TRUE : GRN_FALSE;
     ret = pthread_create(&threads[n], NULL, (void *)thread_query, (void *) &qa[n]);
     if (ret != 0) {
-      rc = GRN_PLUGIN_ERROR;
+      GRN_PLUGIN_ERROR(ctx, GRN_NO_MEMORY_AVAILABLE,
+                       "[parallel_query] failed to create pthread");
+      rc = ctx->rc;
       goto exit;
     }
     n++;
@@ -250,7 +255,9 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
       for (t = 0; t < n; t++) {
         ret = pthread_join(threads[t], NULL);
         if (ret != 0) {
-          rc = GRN_PLUGIN_ERROR;
+          GRN_PLUGIN_ERROR(ctx, GRN_NO_MEMORY_AVAILABLE,
+                           "[parallel_query] failed to join pthread");
+          rc = ctx->rc;
           goto exit;
         } else if (rc != GRN_SUCCESS) {
           goto exit;
@@ -262,15 +269,15 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
 
   if (use_merge_res) {
     rc = grn_table_setoperation(ctx, res, merge_res, res, op);
-    if (merge_res) {
-      grn_obj_unlink(ctx, merge_res);
-    }
   }
 
 #undef QUERY_SET_SIZE
 
 exit :
 
+  if (merge_res) {
+    grn_obj_unlink(ctx, merge_res);
+  }
   return rc;
 }
 
