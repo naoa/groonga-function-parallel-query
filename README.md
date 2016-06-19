@@ -30,6 +30,8 @@ parallel_query(
 
 最後の引数は、複数のクエリ同士をマージする際のoperator。デフォルトOR。先頭はスクリプト構文のoperatorが使われる。
 
+``match_columns``で``columnA||columnB``など、複数カラムを``||``で区切った場合、自動的に展開されてパラレルに検索する。
+
 ## Install
 
 Install libgroonga-dev.
