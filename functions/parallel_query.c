@@ -243,21 +243,26 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
 
       const char *s = GRN_TEXT_VALUE(args[i]);
       const char *e = GRN_BULK_CURR(args[i]);
-      const char *p, *last_pipe = s;
+      const char *p = s, *last_pipe = s;
       unsigned int cl = 0;
       grn_bool have_pipe = GRN_FALSE;
-      for (p = s; p < e && (cl = grn_charlen(ctx, p, e)); p += cl) {
-        if (e - p >= 2 && !memcmp(p, "||", 2) ) {
-          ADD(last_pipe, p - last_pipe, GRN_TEXT_VALUE(args[i + 1]), GRN_TEXT_LEN(args[i + 1]));
-          last_pipe = p + 2;
-          have_pipe = GRN_TRUE;
-        }
-      }
-      if (have_pipe) {
-        ADD(last_pipe, e - last_pipe, GRN_TEXT_VALUE(args[i + 1]), GRN_TEXT_LEN(args[i + 1]));
+      if (e - p >= 1 && !memcmp(p, "*", 1)) {
+        p++;
+        ADD(p, e - p, GRN_TEXT_VALUE(args[i + 1]), GRN_TEXT_LEN(args[i + 1]));
       } else {
-        ADD(GRN_TEXT_VALUE(args[i]), GRN_TEXT_LEN(args[i]),
-            GRN_TEXT_VALUE(args[i + 1]), GRN_TEXT_LEN(args[i + 1]));
+        for (p = s; p < e && (cl = grn_charlen(ctx, p, e)); p += cl) {
+          if (e - p >= 2 && !memcmp(p, "||", 2)) {
+            ADD(last_pipe, p - last_pipe, GRN_TEXT_VALUE(args[i + 1]), GRN_TEXT_LEN(args[i + 1]));
+            last_pipe = p + 2;
+            have_pipe = GRN_TRUE;
+          }
+        }
+        if (have_pipe) {
+          ADD(last_pipe, e - last_pipe, GRN_TEXT_VALUE(args[i + 1]), GRN_TEXT_LEN(args[i + 1]));
+        } else {
+          ADD(GRN_TEXT_VALUE(args[i]), GRN_TEXT_LEN(args[i]),
+              GRN_TEXT_VALUE(args[i + 1]), GRN_TEXT_LEN(args[i + 1]));
+        }
       }
     }
   }
