@@ -29,6 +29,7 @@ parallel_query(
 ```
 
 最後の引数は、複数のクエリ同士をマージする際のoperator。デフォルトOR。先頭はスクリプト構文のoperatorが使われる。
+AND (A OR B) のケースがおかしい。
 
 ## Install
 
