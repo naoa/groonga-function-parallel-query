@@ -205,7 +205,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
       merge_op = GRN_OP_AND;
     } else if (GRN_TEXT_LEN(args[nargs - 1]) >= 3 &&
                !memcmp(GRN_TEXT_VALUE(args[nargs - 1]), "NOT", 3)) {
-      merge_op = GRN_OP_NOT;
+      merge_op = GRN_OP_AND_NOT;
     } else if (GRN_TEXT_LEN(args[nargs - 1]) >= 6 &&
                !memcmp(GRN_TEXT_VALUE(args[nargs - 1]), "ADJUST", 6)) {
       merge_op = GRN_OP_ADJUST;
