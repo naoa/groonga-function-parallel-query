@@ -24,12 +24,11 @@ parallel_query(
  "match_columns", "query",
  "match_columns", "query",
  ...,
- ["AND|OR|NOT|ADJUST"]
+ ["AND|OR|NOT"]
 )
 ```
 
 最後の引数は、複数のクエリ同士をマージする際のoperator。デフォルトOR。先頭はスクリプト構文のoperatorが使われる。
-AND (A OR B) のケースがおかしい。
 
 ## Install
 

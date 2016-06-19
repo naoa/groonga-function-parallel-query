@@ -188,6 +188,8 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
   grn_operator merge_op = GRN_OP_OR;
   grn_bool is_first = GRN_TRUE;
   grn_obj *db = grn_ctx_db(ctx);
+  grn_bool use_merge_res = GRN_FALSE;
+  grn_obj *merge_res = NULL;
 
   if (nargs < 2) {
     GRN_PLUGIN_ERROR(ctx, GRN_INVALID_ARGUMENT,
@@ -213,13 +215,25 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
     n_query_args--;
   }
 
+  if ((op == GRN_OP_AND || op == GRN_OP_AND_NOT) &&
+      (merge_op == GRN_OP_OR)) {
+    use_merge_res = GRN_TRUE;
+    merge_res = grn_table_create(ctx, NULL, 0, NULL,
+                                 GRN_TABLE_HASH_KEY|GRN_OBJ_WITH_SUBREC,
+                                 table, NULL);
+    if (!merge_res) {
+      rc = ctx->rc;
+      goto exit;
+    }
+  }
+
   for (i = 0; i + QUERY_SET_SIZE <= n_query_args; i += QUERY_SET_SIZE) {
     qa[n].db = db;
     qa[n].table = table;
-    qa[n].res = res;
+    qa[n].res = use_merge_res ? merge_res : res;
     qa[n].match_columns_string = args[i];
     qa[n].query = args[i + 1];
-    if (is_first) {
+    if (is_first && !use_merge_res) {
       qa[n].op = op;
       is_first = GRN_FALSE;
     } else {
@@ -245,6 +259,14 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
       n = 0;
     }
   }
+
+  if (use_merge_res) {
+    rc = grn_table_setoperation(ctx, res, merge_res, res, op);
+    if (merge_res) {
+      grn_obj_unlink(ctx, merge_res);
+    }
+  }
+
 #undef QUERY_SET_SIZE
 
 exit :
