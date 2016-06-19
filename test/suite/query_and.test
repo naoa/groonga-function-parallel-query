@@ -1,0 +1,22 @@
+plugin_register functions/parallel_query
+
+table_create Docs TABLE_NO_KEY
+column_create Docs title COLUMN_SCALAR ShortText
+column_create Docs abstract COLUMN_SCALAR ShortText
+
+table_create Lexicon TABLE_HASH_KEY ShortText \
+  --default_tokenizer TokenBigramSplitSymbolAlphaDigit \
+  --normalizer NormalizerAuto
+column_create Lexicon docs_title COLUMN_INDEX|WITH_POSITION Docs title
+column_create Lexicon docs_abstract COLUMN_INDEX|WITH_POSITION Docs abstract
+
+load --table Docs
+[
+{"title": "Book A", "abstract": "abstractA"},
+{"title": "Book B", "abstract": "abstractB"},
+{"title": "Book C", "abstract": "abstractC"}
+]
+
+select Docs \
+  --output_columns title,_score \
+  --filter 'parallel_query("title||abstract", "book abstractA")'
