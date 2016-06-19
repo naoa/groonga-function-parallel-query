@@ -33,8 +33,6 @@ parallel_query(
 ``match_columns``で``columnA||columnB``など、複数カラムを``||``で区切った場合、自動的に展開されてパラレルに検索する。
 ただし、``match_columns``の先頭1文字が``*``の場合は、自動展開はされない。
 
-クエリー内が複数単語でANDの場合、自動展開すると各カラムで複数単語のANDをしてしまう。要検討。
-
 ## Install
 
 Install libgroonga-dev.
