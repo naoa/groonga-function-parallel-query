@@ -15,7 +15,7 @@ load --table Users
 {"name": "Bob"}
 ]
 [[0,0.0,0.0],3]
-select Users   --output_columns name,_score   --filter 'parallel_query("name * 10", "alice", "name * 5", "alisa")'
+select Users   --output_columns name,_score   --filter 'parallel_query("name * 10", "name * 5", "ali")'
 [
   [
     0,
@@ -39,11 +39,11 @@ select Users   --output_columns name,_score   --filter 'parallel_query("name * 1
       ],
       [
         "Alice",
-        10
+        15
       ],
       [
         "Alisa",
-        5
+        15
       ]
     ]
   ]

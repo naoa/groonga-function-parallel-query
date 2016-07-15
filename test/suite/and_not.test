@@ -17,4 +17,4 @@ load --table Users
 
 select Users \
   --output_columns name,_score \
-  --filter 'parallel_query("name * 10", "ali", "name * 5", "alice", "NOT")'
+  --filter 'parallel_query("name * 10", "ali", "name * 5", "alice", {"separate": true, "merge_op": "NOT"})'

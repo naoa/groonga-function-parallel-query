@@ -15,5 +15,5 @@ load --table Users
 {"name": "Bob"}
 ]
 [[0,0.0,0.0],3]
-select Users   --output_columns name,_score   --filter 'parallel_query("name * 10", "ali", "name * 5", "alice", "NOT")'
+select Users   --output_columns name,_score   --filter 'parallel_query("name * 10", "ali", "name * 5", "alice", {"separate": true, "merge_op": "NOT"})'
 [[0,0.0,0.0],[[[1],[["name","ShortText"],["_score","Int32"]],["Alisa",10]]]]

@@ -21,14 +21,13 @@
 
 ```
 parallel_query(
- "match_columns", "query",
- "match_columns", "query",
- ...,
- ["AND|OR|NOT"]
+ "match_columns", "query", "query", ...
+ {"separate": false, "merge_op": "OR"}
 )
 ```
 
-最後の引数は、複数のクエリ同士をマージする際のoperator。デフォルトOR。先頭はスクリプト構文のoperatorが使われる。
+* separate trueにすると``"match_columns", "query", "match_columns", "query" ..`` と個別にmatch_columnsが設定できるようになる。デフォルトではすべて同じmatch_columnsが使われる。
+* merge_op 複数のクエリ同士をマージする際の論演算子。AND|OR|NOT|ADJUST。デフォルトはOR
 
 ## Install
 

@@ -81,6 +81,7 @@ thread_query(void *p)
 
   if (match_columns_string->header.domain == GRN_DB_TEXT &&
       GRN_TEXT_LEN(match_columns_string) > 0) {
+
     GRN_EXPR_CREATE_FOR_QUERY(ctx, table, match_columns, dummy_variable);
     if (!match_columns) {
       rc = ctx->rc;
@@ -193,6 +194,8 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
   grn_obj *db = grn_ctx_db(ctx);
   grn_bool use_merge_res = GRN_FALSE;
   grn_obj *merge_res = NULL;
+  grn_obj *options;
+  grn_bool separate_query = GRN_FALSE;
 
   if (nargs < 2) {
     GRN_PLUGIN_ERROR(ctx, GRN_INVALID_ARGUMENT,
@@ -200,22 +203,57 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
     rc = ctx->rc;
     goto exit;
   }
-#define QUERY_SET_SIZE 2
-  if (nargs > 2 && nargs % QUERY_SET_SIZE) {
-    if (GRN_TEXT_LEN(args[nargs - 1]) >= 2 &&
-        !memcmp(GRN_TEXT_VALUE(args[nargs - 1]), "OR", 2)) {
-      merge_op = GRN_OP_OR;
-    } else if (GRN_TEXT_LEN(args[nargs - 1]) >= 3 &&
-               !memcmp(GRN_TEXT_VALUE(args[nargs - 1]), "AND", 3)) {
-      merge_op = GRN_OP_AND;
-    } else if (GRN_TEXT_LEN(args[nargs - 1]) >= 3 &&
-               !memcmp(GRN_TEXT_VALUE(args[nargs - 1]), "NOT", 3)) {
-      merge_op = GRN_OP_AND_NOT;
-    } else if (GRN_TEXT_LEN(args[nargs - 1]) >= 6 &&
-               !memcmp(GRN_TEXT_VALUE(args[nargs - 1]), "ADJUST", 6)) {
-      merge_op = GRN_OP_ADJUST;
-    }
+
+  options = args[nargs - 1];
+  if (options->header.type == GRN_TABLE_HASH_KEY) {
+    grn_hash_cursor *cursor;
+    void *key;
+    grn_obj *value;
+    unsigned int key_size;
     n_query_args--;
+    cursor = grn_hash_cursor_open(ctx, (grn_hash *)options,
+                                  NULL, 0, NULL, 0,
+                                  0, -1, 0);
+    if (!cursor) {
+      GRN_PLUGIN_ERROR(ctx, GRN_NO_MEMORY_AVAILABLE,
+                       "parallel_query(): couldn't open cursor");
+      goto exit;
+    }
+    while (grn_hash_cursor_next(ctx, cursor) != GRN_ID_NIL) {
+      grn_hash_cursor_get_key_value(ctx, cursor, &key, &key_size,
+                                    (void **)&value);
+
+      if (key_size == 8 && !memcmp(key, "separate", 8)) {
+        separate_query = GRN_TRUE;
+      } else if (key_size == 8 && !memcmp(key, "merge_op", 8)) {
+        if (GRN_TEXT_LEN(value) >= 2 &&
+            !memcmp(GRN_TEXT_VALUE(value), "OR", 2)) {
+          merge_op = GRN_OP_OR;
+        } else if (GRN_TEXT_LEN(value) >= 3 &&
+                   !memcmp(GRN_TEXT_VALUE(value), "AND", 3)) {
+          merge_op = GRN_OP_AND;
+        } else if (GRN_TEXT_LEN(value) >= 3 &&
+                   !memcmp(GRN_TEXT_VALUE(value), "NOT", 3)) {
+          merge_op = GRN_OP_AND_NOT;
+        } else if (GRN_TEXT_LEN(value) >= 6 &&
+                   !memcmp(GRN_TEXT_VALUE(value), "ADJUST", 6)) {
+          merge_op = GRN_OP_ADJUST;
+        } else {
+          GRN_PLUGIN_ERROR(ctx, GRN_INVALID_ARGUMENT,
+                           "invalid option name: <%.*s>",
+                           (int)GRN_TEXT_LEN(value), GRN_TEXT_VALUE(value));
+          grn_hash_cursor_close(ctx, cursor);
+          goto exit;
+        }
+      } else {
+        GRN_PLUGIN_ERROR(ctx, GRN_INVALID_ARGUMENT,
+                         "invalid option name: <%.*s>",
+                         key_size, (char *)key);
+        grn_hash_cursor_close(ctx, cursor);
+        goto exit;
+      }
+    }
+    grn_hash_cursor_close(ctx, cursor);
   }
 
   if ((op == GRN_OP_AND || op == GRN_OP_AND_NOT) &&
@@ -230,48 +268,88 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
     }
   }
 
-  for (i = 0; i + QUERY_SET_SIZE <= n_query_args; i += QUERY_SET_SIZE) {
-    qa[n].db = db;
-    qa[n].table = table;
-    qa[n].res = use_merge_res ? merge_res : res;
-    qa[n].match_columns_string = args[i];
-    qa[n].query = args[i + 1];
-    if (is_first && !use_merge_res) {
-      qa[n].op = op;
-      is_first = GRN_FALSE;
-    } else {
-      qa[n].op = merge_op;
-    }
-    qa[n].main = n == 0 ? GRN_TRUE : GRN_FALSE;
-    ret = pthread_create(&threads[n], NULL, (void *)thread_query, (void *) &qa[n]);
-    if (ret != 0) {
-      GRN_PLUGIN_ERROR(ctx, GRN_NO_MEMORY_AVAILABLE,
-                       "[parallel_query] failed to create pthread");
-      rc = ctx->rc;
-      goto exit;
-    }
-    n++;
-    if (n == n_worker || i + QUERY_SET_SIZE >= n_query_args) {
-      for (t = 0; t < n; t++) {
-        ret = pthread_join(threads[t], NULL);
-        if (ret != 0) {
-          GRN_PLUGIN_ERROR(ctx, GRN_NO_MEMORY_AVAILABLE,
-                           "[parallel_query] failed to join pthread");
-          rc = ctx->rc;
-          goto exit;
-        } else if (rc != GRN_SUCCESS) {
-          goto exit;
-        }
+  if (!separate_query) {
+    for (i = 0; i < n_query_args - 1; i++) {
+      qa[n].db = db;
+      qa[n].table = table;
+      qa[n].res = use_merge_res ? merge_res : res;
+      qa[n].match_columns_string = args[i];
+      qa[n].query = args[n_query_args - 1];
+      if (is_first && !use_merge_res) {
+        qa[n].op = op;
+        is_first = GRN_FALSE;
+      } else {
+        qa[n].op = merge_op;
       }
-      n = 0;
+      qa[n].main = n == 0 ? GRN_TRUE : GRN_FALSE;
+
+      ret = pthread_create(&threads[n], NULL, (void *)thread_query, (void *) &qa[n]);
+      if (ret != 0) {
+        GRN_PLUGIN_ERROR(ctx, GRN_NO_MEMORY_AVAILABLE,
+                         "[parallel_query] failed to create pthread");
+        rc = ctx->rc;
+        goto exit;
+      }
+      n++;
+      if (n == n_worker || i >= n_query_args - 2) {
+        for (t = 0; t < n; t++) {
+          ret = pthread_join(threads[t], NULL);
+          if (ret != 0) {
+            GRN_PLUGIN_ERROR(ctx, GRN_NO_MEMORY_AVAILABLE,
+                             "[parallel_query] failed to join pthread");
+            rc = ctx->rc;
+            goto exit;
+          } else if (rc != GRN_SUCCESS) {
+            goto exit;
+          }
+        }
+        n = 0;
+      }
     }
+  } else {
+#define QUERY_SET_SIZE 2
+    for (i = 0; i + QUERY_SET_SIZE <= n_query_args; i += QUERY_SET_SIZE) {
+      qa[n].db = db;
+      qa[n].table = table;
+      qa[n].res = use_merge_res ? merge_res : res;
+      qa[n].match_columns_string = args[i];
+      qa[n].query = args[i + 1];
+      if (is_first && !use_merge_res) {
+        qa[n].op = op;
+        is_first = GRN_FALSE;
+      } else {
+        qa[n].op = merge_op;
+      }
+      qa[n].main = n == 0 ? GRN_TRUE : GRN_FALSE;
+      ret = pthread_create(&threads[n], NULL, (void *)thread_query, (void *) &qa[n]);
+      if (ret != 0) {
+        GRN_PLUGIN_ERROR(ctx, GRN_NO_MEMORY_AVAILABLE,
+                         "[parallel_query] failed to create pthread");
+        rc = ctx->rc;
+        goto exit;
+      }
+      n++;
+      if (n == n_worker || i + QUERY_SET_SIZE >= n_query_args) {
+        for (t = 0; t < n; t++) {
+          ret = pthread_join(threads[t], NULL);
+          if (ret != 0) {
+            GRN_PLUGIN_ERROR(ctx, GRN_NO_MEMORY_AVAILABLE,
+                             "[parallel_query] failed to join pthread");
+            rc = ctx->rc;
+            goto exit;
+          } else if (rc != GRN_SUCCESS) {
+            goto exit;
+          }
+        }
+        n = 0;
+      }
+    }
+#undef QUERY_SET_SIZE
   }
 
   if (use_merge_res) {
     rc = grn_table_setoperation(ctx, res, merge_res, res, op);
   }
-
-#undef QUERY_SET_SIZE
 
 exit :
 
