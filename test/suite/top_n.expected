@@ -39,11 +39,11 @@ select Users   --output_columns name,_score   --filter 'parallel_query("name * 1
         ]
       ],
       [
-        "Alice",
+        "AliAlisa",
         30
       ],
       [
-        "Alisa",
+        "AliAlice",
         30
       ]
     ]
