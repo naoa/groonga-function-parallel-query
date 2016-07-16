@@ -1,0 +1,51 @@
+plugin_register functions/parallel_query
+[[0,0.0,0.0],true]
+table_create Users TABLE_NO_KEY
+[[0,0.0,0.0],true]
+column_create Users name COLUMN_SCALAR ShortText
+[[0,0.0,0.0],true]
+table_create Lexicon TABLE_HASH_KEY ShortText   --default_tokenizer TokenBigramSplitSymbolAlphaDigit   --normalizer NormalizerAuto
+[[0,0.0,0.0],true]
+column_create Lexicon users_name COLUMN_INDEX|WITH_POSITION Users name
+[[0,0.0,0.0],true]
+load --table Users
+[
+{"name": "Alice"},
+{"name": "Alisa"},
+{"name": "AliAlisa"},
+{"name": "AliAlice"}
+]
+[[0,0.0,0.0],4]
+select Users   --output_columns name,_score   --filter 'parallel_query("name * 10", "name * 5", "ali", {"top_n": 2})'
+[
+  [
+    0,
+    0.0,
+    0.0
+  ],
+  [
+    [
+      [
+        2
+      ],
+      [
+        [
+          "name",
+          "ShortText"
+        ],
+        [
+          "_score",
+          "Int32"
+        ]
+      ],
+      [
+        "Alice",
+        30
+      ],
+      [
+        "Alisa",
+        30
+      ]
+    ]
+  ]
+]

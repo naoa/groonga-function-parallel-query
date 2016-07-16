@@ -45,6 +45,96 @@ typedef struct {
 } grn_rset_posinfo;
 /* lib/grn_rset.h */
 
+static grn_rc
+grn_sorted_table_setoperation(grn_ctx *ctx, grn_obj *thread_res, grn_obj *sorted, grn_obj *res, 
+                              grn_operator op)
+{
+  grn_rc rc = GRN_SUCCESS;
+  grn_id *res_id;
+  grn_table_cursor *cur;
+  grn_id sid;
+  grn_obj *score_column = NULL;
+  grn_obj score_value;
+  GRN_FLOAT_INIT(&score_value, 0);
+
+  score_column = grn_obj_column(ctx, thread_res,
+                                GRN_COLUMN_NAME_SCORE,
+                                GRN_COLUMN_NAME_SCORE_LEN);
+
+  if (!score_column) {
+    goto exit;
+  }
+
+  cur = grn_table_cursor_open(ctx, sorted, NULL, 0, NULL, 0, 0, -1, GRN_CURSOR_BY_ID);
+  if (!cur) {
+    goto exit;
+  }
+
+  switch (op) {
+  case GRN_OP_OR :
+    while ((sid = grn_table_cursor_next(ctx, cur)) != GRN_ID_NIL) {
+      int added;
+      grn_rset_recinfo *ri_res;
+      grn_table_cursor_get_value(ctx, cur, (void **)&res_id);
+      GRN_BULK_REWIND(&score_value);
+      grn_obj_get_value(ctx, score_column, *res_id, &score_value);
+      if (grn_hash_add(ctx, (grn_hash *)res, res_id, sizeof(grn_id), (void **)&ri_res, &added)) {
+        if (added) {
+          ri_res->score = GRN_FLOAT_VALUE(&score_value);
+          ri_res->n_subrecs = 1;
+        } else {
+          ri_res->score += GRN_FLOAT_VALUE(&score_value);
+          ri_res->n_subrecs += 1;
+        }
+      }
+    }
+    break;
+  case GRN_OP_AND :
+    while ((sid = grn_table_cursor_next(ctx, cur)) != GRN_ID_NIL) {
+      grn_rset_recinfo *ri_res;
+      grn_table_cursor_get_value(ctx, cur, (void **)&res_id);
+      GRN_BULK_REWIND(&score_value);
+      grn_obj_get_value(ctx, score_column, *res_id, &score_value);
+      if (grn_hash_get(ctx, (grn_hash *)res, res_id, sizeof(grn_id), (void **)&ri_res)) {
+        ri_res->score += GRN_FLOAT_VALUE(&score_value);
+        ri_res->n_subrecs += 1;
+      } else {
+        grn_hash_delete_by_id(ctx, (grn_hash *)res, *res_id, NULL);
+      }
+    }
+    break;
+  case GRN_OP_AND_NOT :
+    while ((sid = grn_table_cursor_next(ctx, cur)) != GRN_ID_NIL) {
+      grn_table_cursor_get_value(ctx, cur, (void **)&res_id);
+      grn_hash_delete_by_id(ctx, (grn_hash *)res, *res_id, NULL);
+    }
+    break;
+  case GRN_OP_ADJUST :
+    while ((sid = grn_table_cursor_next(ctx, cur)) != GRN_ID_NIL) {
+      grn_rset_recinfo *ri_res;
+      grn_table_cursor_get_value(ctx, cur, (void **)&res_id);
+      GRN_BULK_REWIND(&score_value);
+      grn_obj_get_value(ctx, score_column, *res_id, &score_value);
+      if (grn_hash_get(ctx, (grn_hash *)res, res_id, sizeof(grn_id), (void **)&ri_res)) {
+        ri_res->score = GRN_FLOAT_VALUE(&score_value);
+      }
+    }
+    break;
+  default :
+    break;
+  }
+  grn_table_cursor_close(ctx, cur);
+
+exit :
+
+  GRN_OBJ_FIN(ctx, &score_value);
+  if (score_column) {
+    grn_obj_unlink(ctx, score_column);
+  }
+
+  return rc;
+}
+
 typedef struct {
   grn_obj *db;
   grn_obj *table;
@@ -53,6 +143,9 @@ typedef struct {
   grn_obj *query;
   grn_operator op;
   grn_bool main;
+  unsigned int top_n;
+  const char *top_n_sort_keys;
+  unsigned int top_n_sort_keys_length;
 } thread_query_args;
 
 static void*
@@ -66,6 +159,10 @@ thread_query(void *p)
   grn_obj *match_columns_string = ip->match_columns_string;
   grn_obj *query = ip->query;
   grn_operator op = ip->op;
+  unsigned int top_n = ip->top_n;
+  const char *top_n_sort_keys = ip->top_n_sort_keys;
+  unsigned int top_n_sort_keys_length = ip->top_n_sort_keys_length;
+
   grn_rc rc = GRN_SUCCESS;
   grn_obj *match_columns = NULL;
   grn_obj *condition = NULL;
@@ -137,6 +234,7 @@ thread_query(void *p)
         goto exit;
       }
     } else {
+      unsigned int n_hits;
       thread_res = grn_table_create(ctx, NULL, 0, NULL,
                                     GRN_TABLE_HASH_KEY|GRN_OBJ_WITH_SUBREC,
                                     table, NULL);
@@ -147,17 +245,42 @@ thread_query(void *p)
       grn_table_select(ctx, table, condition, thread_res, GRN_OP_OR);
       rc = ctx->rc;
 
-      if (grn_table_size(ctx, thread_res) > 0) {
-        ret = pthread_mutex_lock(&m);
-        if (ret != 0) {
-          rc = GRN_NO_LOCKS_AVAILABLE;
-          goto exit;
-        }
-        rc = grn_table_setoperation(ctx, res, thread_res, res, op);
-        ret = pthread_mutex_unlock(&m);
-        if (ret != 0) {
-          rc = GRN_NO_LOCKS_AVAILABLE;
-          goto exit;
+      n_hits = grn_table_size(ctx, thread_res);
+      if (n_hits > 0) {
+        if (top_n == 0 || n_hits <= top_n) {
+          ret = pthread_mutex_lock(&m);
+          if (ret != 0) {
+            rc = GRN_NO_LOCKS_AVAILABLE;
+            goto exit;
+          }
+          rc = grn_table_setoperation(ctx, res, thread_res, res, op);
+          ret = pthread_mutex_unlock(&m);
+          if (ret != 0) {
+            rc = GRN_NO_LOCKS_AVAILABLE;
+            goto exit;
+          }
+        } else {
+          grn_obj *sorted;
+          if ((sorted = grn_table_create(ctx, NULL, 0, NULL, GRN_OBJ_TABLE_NO_KEY, NULL, thread_res))) {
+            uint32_t nkeys;
+            grn_table_sort_key *keys;
+            if ((keys = grn_table_sort_key_from_str(ctx, top_n_sort_keys, top_n_sort_keys_length, thread_res, &nkeys))) {
+              grn_table_sort(ctx, thread_res, 0, top_n, sorted, keys, nkeys);
+              ret = pthread_mutex_lock(&m);
+              if (ret != 0) {
+                rc = GRN_NO_LOCKS_AVAILABLE;
+                goto exit;
+              }
+              rc = grn_sorted_table_setoperation(ctx, thread_res, sorted, res, op);
+              ret = pthread_mutex_unlock(&m);
+              if (ret != 0) {
+                rc = GRN_NO_LOCKS_AVAILABLE;
+                goto exit;
+              }
+              grn_table_sort_key_close(ctx, keys, nkeys);
+            }
+            grn_obj_unlink(ctx, sorted);
+          }
         }
       }
     }
@@ -196,6 +319,9 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
   grn_obj *merge_res = NULL;
   grn_obj *options;
   grn_bool separate_query = GRN_FALSE;
+  unsigned int top_n = 0;
+  const char *top_n_sort_keys = "-_score";
+  unsigned int top_n_sort_keys_length = 7;
 
   if (nargs < 2) {
     GRN_PLUGIN_ERROR(ctx, GRN_INVALID_ARGUMENT,
@@ -225,6 +351,11 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
 
       if (key_size == 8 && !memcmp(key, "separate", 8)) {
         separate_query = GRN_TRUE;
+      } else if (key_size == 5 && !memcmp(key, "top_n", 5)) {
+        top_n = GRN_UINT32_VALUE(value);
+      } else if (key_size == 15 && !memcmp(key, "top_n_sort_keys", 15)) {
+        top_n_sort_keys = GRN_TEXT_VALUE(value);
+        top_n_sort_keys_length = GRN_TEXT_LEN(value);
       } else if (key_size == 8 && !memcmp(key, "merge_op", 8)) {
         if (GRN_TEXT_LEN(value) >= 2 &&
             !memcmp(GRN_TEXT_VALUE(value), "OR", 2)) {
@@ -256,8 +387,15 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
     grn_hash_cursor_close(ctx, cursor);
   }
 
-  if ((op == GRN_OP_AND || op == GRN_OP_AND_NOT) &&
-      (merge_op == GRN_OP_OR)) {
+  if (top_n > 0 && merge_op != GRN_OP_OR) {
+    GRN_PLUGIN_ERROR(ctx, GRN_INVALID_ARGUMENT,
+                     "merge_op must be OR if top_n > 0");
+    goto exit;
+  }
+
+  if (top_n > 0 ||
+      ((op == GRN_OP_AND || op == GRN_OP_AND_NOT) &&
+       (merge_op == GRN_OP_OR))) {
     use_merge_res = GRN_TRUE;
     merge_res = grn_table_create(ctx, NULL, 0, NULL,
                                  GRN_TABLE_HASH_KEY|GRN_OBJ_WITH_SUBREC,
@@ -275,13 +413,17 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
       qa[n].res = use_merge_res ? merge_res : res;
       qa[n].match_columns_string = args[i];
       qa[n].query = args[n_query_args - 1];
+      qa[n].top_n = top_n;
+      qa[n].top_n_sort_keys = top_n_sort_keys;
+      qa[n].top_n_sort_keys_length = top_n_sort_keys_length;
+
       if (is_first && !use_merge_res) {
         qa[n].op = op;
         is_first = GRN_FALSE;
       } else {
         qa[n].op = merge_op;
       }
-      qa[n].main = n == 0 ? GRN_TRUE : GRN_FALSE;
+      qa[n].main = (n == 0 && top_n == 0) ? GRN_TRUE : GRN_FALSE;
 
       ret = pthread_create(&threads[n], NULL, (void *)thread_query, (void *) &qa[n]);
       if (ret != 0) {
@@ -314,13 +456,17 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
       qa[n].res = use_merge_res ? merge_res : res;
       qa[n].match_columns_string = args[i];
       qa[n].query = args[i + 1];
+      qa[n].top_n = top_n;
+      qa[n].top_n_sort_keys = top_n_sort_keys;
+      qa[n].top_n_sort_keys_length = top_n_sort_keys_length;
+
       if (is_first && !use_merge_res) {
         qa[n].op = op;
         is_first = GRN_FALSE;
       } else {
         qa[n].op = merge_op;
       }
-      qa[n].main = n == 0 ? GRN_TRUE : GRN_FALSE;
+      qa[n].main = (n == 0 && top_n == 0) ? GRN_TRUE : GRN_FALSE;
       ret = pthread_create(&threads[n], NULL, (void *)thread_query, (void *) &qa[n]);
       if (ret != 0) {
         GRN_PLUGIN_ERROR(ctx, GRN_NO_MEMORY_AVAILABLE,
@@ -348,7 +494,21 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
   }
 
   if (use_merge_res) {
-    rc = grn_table_setoperation(ctx, res, merge_res, res, op);
+    if (top_n == 0) {
+      rc = grn_table_setoperation(ctx, res, merge_res, res, op);
+    } else {
+      grn_obj *sorted;
+      if ((sorted = grn_table_create(ctx, NULL, 0, NULL, GRN_OBJ_TABLE_NO_KEY, NULL, merge_res))) {
+        uint32_t nkeys;
+        grn_table_sort_key *keys;
+        if ((keys = grn_table_sort_key_from_str(ctx, top_n_sort_keys, top_n_sort_keys_length, merge_res, &nkeys))) {
+          grn_table_sort(ctx, merge_res, 0, top_n, sorted, keys, nkeys);
+          rc = grn_sorted_table_setoperation(ctx, merge_res, sorted, res, op);
+          grn_table_sort_key_close(ctx, keys, nkeys);
+        }
+        grn_obj_unlink(ctx, sorted);
+      }
+    }
   }
 
 exit :
