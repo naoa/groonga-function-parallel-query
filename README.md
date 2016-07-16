@@ -15,8 +15,6 @@
 環境変数
 ``GRN_PARALLEL_QUERY_N_WORKER``
 
-検証中。
-
 ## Syntax
 
 ```
