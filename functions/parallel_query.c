@@ -91,32 +91,6 @@ grn_sorted_table_setoperation(grn_ctx *ctx, grn_obj *thread_res, grn_obj *sorted
       }
     }
     break;
-  case GRN_OP_AND :
-    while ((sid = grn_table_cursor_next(ctx, cur)) != GRN_ID_NIL) {
-      grn_id *thread_res_id;
-      grn_id rid;
-      grn_rset_recinfo *ri_res;
-      grn_table_cursor_get_value(ctx, cur, (void **)&thread_res_id);
-      grn_hash_get_key(ctx, (grn_hash *)thread_res, *thread_res_id, &rid, sizeof(grn_id));
-      GRN_BULK_REWIND(&score_value);
-      grn_obj_get_value(ctx, score_column, *thread_res_id, &score_value);
-      if (grn_hash_get(ctx, (grn_hash *)res, &rid, sizeof(grn_id), (void **)&ri_res)) {
-        ri_res->score += GRN_FLOAT_VALUE(&score_value);
-        ri_res->n_subrecs += 1;
-      } else {
-        grn_hash_delete_by_id(ctx, (grn_hash *)res, rid, NULL);
-      }
-    }
-    break;
-  case GRN_OP_AND_NOT :
-    while ((sid = grn_table_cursor_next(ctx, cur)) != GRN_ID_NIL) {
-      grn_id *thread_res_id;
-      grn_id rid;
-      grn_table_cursor_get_value(ctx, cur, (void **)&thread_res_id);
-      grn_hash_get_key(ctx, (grn_hash *)thread_res, *thread_res_id, &rid, sizeof(grn_id));
-      grn_hash_delete_by_id(ctx, (grn_hash *)res, rid, NULL);
-    }
-    break;
   case GRN_OP_ADJUST :
     while ((sid = grn_table_cursor_next(ctx, cur)) != GRN_ID_NIL) {
       grn_id *thread_res_id;
@@ -514,7 +488,47 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
         grn_table_sort_key *keys;
         if ((keys = grn_table_sort_key_from_str(ctx, top_n_sort_keys, top_n_sort_keys_length, merge_res, &nkeys))) {
           grn_table_sort(ctx, merge_res, 0, top_n, sorted, keys, nkeys);
-          rc = grn_sorted_table_setoperation(ctx, merge_res, sorted, res, op);
+
+          if (op == GRN_OP_OR || op == GRN_OP_ADJUST) {
+            rc = grn_sorted_table_setoperation(ctx, merge_res, sorted, res, op);
+          } else {
+            grn_obj *sorted_res;
+            grn_id *result_id;
+            grn_obj *score_column = NULL;
+            grn_obj score_value;
+            GRN_FLOAT_INIT(&score_value, 0);
+
+            score_column = grn_obj_column(ctx, merge_res,
+                                          GRN_COLUMN_NAME_SCORE,
+                                          GRN_COLUMN_NAME_SCORE_LEN);
+
+            sorted_res = grn_table_create(ctx, NULL, 0, NULL,
+                                          GRN_TABLE_HASH_KEY|GRN_OBJ_WITH_SUBREC,
+                                          table,
+                                          NULL);
+            GRN_ARRAY_EACH(ctx, (grn_array *)sorted, 0, 0, id, &result_id, {
+              grn_id rid;
+              if (grn_hash_get_key(ctx, (grn_hash *)merge_res, *result_id, &rid, sizeof(grn_id))) {
+                grn_rset_recinfo *ri;
+                int added;
+                GRN_BULK_REWIND(&score_value);
+                grn_obj_get_value(ctx, score_column, *result_id, &score_value);
+                if (grn_hash_add(ctx, (grn_hash *)sorted_res, &rid, sizeof(grn_id), (void **)&ri, &added)) {
+                  if (added) {
+                    ri->score = GRN_FLOAT_VALUE(&score_value);
+                    ri->n_subrecs = 1;
+                  } else {
+                    ri->score += GRN_FLOAT_VALUE(&score_value);
+                    ri->n_subrecs += 1;
+                  }
+                }
+              }
+            });
+            rc = grn_table_setoperation(ctx, res, sorted_res, res, op);
+            grn_obj_unlink(ctx, score_column);
+            grn_obj_unlink(ctx, sorted_res);
+            GRN_OBJ_FIN(ctx, &score_value);
+          }
           grn_table_sort_key_close(ctx, keys, nkeys);
         }
         grn_obj_unlink(ctx, sorted);
