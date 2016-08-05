@@ -218,7 +218,6 @@ grn_sorted_res_add(grn_ctx *ctx, grn_obj *sorted, grn_obj *thread_res, grn_obj *
     {
       grn_id id;
       while ((id = grn_table_cursor_next(ctx, cur)) != GRN_ID_NIL) {
-        int added;
         grn_id *thread_res_id;
         grn_id rid;
         grn_rset_recinfo *ri_res;
@@ -238,10 +237,8 @@ grn_sorted_res_add(grn_ctx *ctx, grn_obj *sorted, grn_obj *thread_res, grn_obj *
     {
       grn_id id;
       while ((id = grn_table_cursor_next(ctx, cur)) != GRN_ID_NIL) {
-        int added;
         grn_id *thread_res_id;
         grn_id rid;
-        grn_rset_recinfo *ri_res;
         grn_table_cursor_get_value(ctx, cur, (void **)&thread_res_id);
         grn_hash_get_key(ctx, (grn_hash *)thread_res, *thread_res_id, &rid, sizeof(grn_id));
         grn_table_delete(ctx, res, &rid, sizeof(grn_id));
@@ -252,7 +249,6 @@ grn_sorted_res_add(grn_ctx *ctx, grn_obj *sorted, grn_obj *thread_res, grn_obj *
     {
       grn_id id;
       while ((id = grn_table_cursor_next(ctx, cur)) != GRN_ID_NIL) {
-        int added;
         grn_id *thread_res_id;
         grn_id rid;
         grn_rset_recinfo *ri_res;
@@ -278,81 +274,6 @@ exit:
   if (score_column) {
     grn_obj_unlink(ctx, score_column);
   }
-  return rc;
-}
-
-static grn_rc
-grn_sorted_table_setoperation(grn_ctx *ctx, grn_obj *thread_res, grn_obj *sorted, grn_obj *res, 
-                              grn_operator op)
-{
-  grn_rc rc = GRN_SUCCESS;
-  grn_table_cursor *cur;
-  grn_id sid;
-  grn_obj *score_column = NULL;
-  grn_obj score_value;
-  GRN_FLOAT_INIT(&score_value, 0);
-
-  score_column = grn_obj_column(ctx, thread_res,
-                                GRN_COLUMN_NAME_SCORE,
-                                GRN_COLUMN_NAME_SCORE_LEN);
-
-  if (!score_column) {
-    goto exit;
-  }
-
-  cur = grn_table_cursor_open(ctx, sorted, NULL, 0, NULL, 0, 0, -1, GRN_CURSOR_BY_ID);
-  if (!cur) {
-    goto exit;
-  }
-
-  switch (op) {
-  case GRN_OP_OR :
-    while ((sid = grn_table_cursor_next(ctx, cur)) != GRN_ID_NIL) {
-      int added;
-      grn_id *thread_res_id;
-      grn_id rid;
-      grn_rset_recinfo *ri_res;
-      grn_table_cursor_get_value(ctx, cur, (void **)&thread_res_id);
-      grn_hash_get_key(ctx, (grn_hash *)thread_res, *thread_res_id, &rid, sizeof(grn_id));
-      GRN_BULK_REWIND(&score_value);
-      grn_obj_get_value(ctx, score_column, *thread_res_id, &score_value);
-      if (grn_hash_add(ctx, (grn_hash *)res, &rid, sizeof(grn_id), (void **)&ri_res, &added)) {
-        if (added) {
-          ri_res->score = GRN_FLOAT_VALUE(&score_value);
-          ri_res->n_subrecs = 1;
-        } else {
-          ri_res->score += GRN_FLOAT_VALUE(&score_value);
-          ri_res->n_subrecs += 1;
-        }
-      }
-    }
-    break;
-  case GRN_OP_ADJUST :
-    while ((sid = grn_table_cursor_next(ctx, cur)) != GRN_ID_NIL) {
-      grn_id *thread_res_id;
-      grn_id rid;
-      grn_rset_recinfo *ri_res;
-      grn_table_cursor_get_value(ctx, cur, (void **)&thread_res_id);
-      grn_hash_get_key(ctx, (grn_hash *)thread_res, *thread_res_id, &rid, sizeof(grn_id));
-      GRN_BULK_REWIND(&score_value);
-      grn_obj_get_value(ctx, score_column, *thread_res_id, &score_value);
-      if (grn_hash_get(ctx, (grn_hash *)res, &rid, sizeof(grn_id), (void **)&ri_res)) {
-        ri_res->score = GRN_FLOAT_VALUE(&score_value);
-      }
-    }
-    break;
-  default :
-    break;
-  }
-  grn_table_cursor_close(ctx, cur);
-
-exit :
-
-  GRN_OBJ_FIN(ctx, &score_value);
-  if (score_column) {
-    grn_obj_unlink(ctx, score_column);
-  }
-
   return rc;
 }
 
