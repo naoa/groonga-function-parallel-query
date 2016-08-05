@@ -20,13 +20,14 @@
 ```
 parallel_query(
  "match_columns", "match_columns".., "query",
- {"separate": false, "merge_op": "OR", "top_n": 0, "top_n_sort_keys": "-_score"}
+ {"separate": false, "top_n": 0, "top_n_sort_keys": "-_score"}
 )
 ```
 
+複数のクエリ同士はin_valuesみたいに(query1 OR query2)で演算される。
+
 * separate trueにすると``"match_columns", "query", "match_columns", "query" ..`` と個別にqueryが設定できるようになる。デフォルトではすべて同じqueryが使われる。
-* merge_op 複数のクエリ同士をマージする際の論演算子。AND|OR|NOT|ADJUST。デフォルトはOR
-* top_n マージする対象とする上位件数 0の場合、全件マージする このオプションはmerge_opがORでなくてはならない
+* top_n マージする対象とする上位件数 0の場合、全件マージする このオプションはOP_ORの場合のみ適用される
 * top_n_sort_keys マージする際に上位n件を求めるためのソートキー
 
 ## Install
