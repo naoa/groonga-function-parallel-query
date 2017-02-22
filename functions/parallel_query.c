@@ -29,8 +29,6 @@
 
 int n_worker = 8;
 
-pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
-
 /* copy from lib/grn_rset.h */
 
 #define GRN_RSET_UTIL_BIT (0x80000000)
