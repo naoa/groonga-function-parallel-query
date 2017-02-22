@@ -288,6 +288,7 @@ typedef struct {
   unsigned int top_n;
   const char *top_n_sort_keys;
   unsigned int top_n_sort_keys_length;
+  pthread_mutex_t *m;
 } thread_query_args;
 
 static void*
@@ -364,14 +365,14 @@ thread_query(void *p)
 
     ctx->flags |= GRN_CTX_TEMPORARY_DISABLE_II_RESOLVE_SEL_AND;
     if (ip->main) {
-      ret = pthread_mutex_lock(&m);
+      ret = pthread_mutex_lock(ip->m);
       if (ret != 0) {
         rc = GRN_NO_LOCKS_AVAILABLE;
         goto exit;
       }
       grn_table_select(ctx, table, condition, res, op);
       rc = ctx->rc;
-      ret = pthread_mutex_unlock(&m);
+      ret = pthread_mutex_unlock(ip->m);
       if (ret != 0) {
         rc = GRN_NO_LOCKS_AVAILABLE;
         goto exit;
@@ -391,13 +392,13 @@ thread_query(void *p)
       n_hits = grn_table_size(ctx, thread_res);
       if (n_hits > 0) {
         if (top_n == 0 || n_hits <= top_n) {
-          ret = pthread_mutex_lock(&m);
+          ret = pthread_mutex_lock(ip->m);
           if (ret != 0) {
             rc = GRN_NO_LOCKS_AVAILABLE;
             goto exit;
           }
           rc = grn_table_res_add(ctx, thread_res, res, op);
-          ret = pthread_mutex_unlock(&m);
+          ret = pthread_mutex_unlock(ip->m);
           if (ret != 0) {
             rc = GRN_NO_LOCKS_AVAILABLE;
             goto exit;
@@ -409,13 +410,13 @@ thread_query(void *p)
             grn_table_sort_key *keys;
             if ((keys = grn_table_sort_key_from_str(ctx, top_n_sort_keys, top_n_sort_keys_length, thread_res, &nkeys))) {
               grn_table_sort(ctx, thread_res, 0, top_n, sorted, keys, nkeys);
-              ret = pthread_mutex_lock(&m);
+              ret = pthread_mutex_lock(ip->m);
               if (ret != 0) {
                 rc = GRN_NO_LOCKS_AVAILABLE;
                 goto exit;
               }
               rc = grn_sorted_res_add(ctx, sorted, thread_res, res, op);
-              ret = pthread_mutex_unlock(&m);
+              ret = pthread_mutex_unlock(ip->m);
               if (ret != 0) {
                 rc = GRN_NO_LOCKS_AVAILABLE;
                 goto exit;
@@ -462,6 +463,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
   const char *top_n_sort_keys = "-_score";
   unsigned int top_n_sort_keys_length = 7;
   grn_obj *merge_res = NULL;
+  pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
 
   if (nargs < 2) {
     GRN_PLUGIN_ERROR(ctx, GRN_INVALID_ARGUMENT,
@@ -533,6 +535,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
       qa[n].top_n_sort_keys_length = top_n_sort_keys_length;
       qa[n].op = op;
       qa[n].main = (n == 0 && top_n == 0 && op == GRN_OP_OR) ? GRN_TRUE : GRN_FALSE;
+      qa[n].m = &m;
 
       ret = pthread_create(&threads[n], NULL, (void *)thread_query, (void *) &qa[n]);
       if (ret != 0) {
@@ -570,6 +573,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
       qa[n].top_n_sort_keys_length = top_n_sort_keys_length;
       qa[n].op = op;
       qa[n].main = (n == 0 && top_n == 0 && op == GRN_OP_OR) ? GRN_TRUE : GRN_FALSE;
+      qa[n].m = &m;
 
       ret = pthread_create(&threads[n], NULL, (void *)thread_query, (void *) &qa[n]);
       if (ret != 0) {
@@ -615,6 +619,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
   grn_ii_resolve_sel_and_(ctx, (grn_hash *)res, op);
 
 exit :
+  pthread_mutex_destroy(&m);
 
   if (merge_res) {
     grn_obj_unlink(ctx, merge_res);
