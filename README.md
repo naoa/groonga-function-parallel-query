@@ -20,7 +20,7 @@
 ```
 parallel_query(
  "match_columns", "match_columns".., "query",
- {"separate": false, "top_n": 0, "top_n_sort_keys": "-_score"}
+ {"separate": false, "top_n": 0, "top_n_sort_keys": "-_score", "digit_format": 0}
 )
 ```
 
@@ -29,6 +29,7 @@ parallel_query(
 * separate trueにすると``"match_columns", "query", "match_columns", "query" ..`` と個別にqueryが設定できるようになる。デフォルトではすべて同じqueryが使われる。
 * top_n マージする対象とする上位件数 0の場合、全件マージする このオプションはOP_ORの場合のみ適用される
 * top_n_sort_keys マージする際に上位n件を求めるためのソートキー
+* digit_format match_columnsに設定された``%``を展開する数値0-9
 
 ## Install
 
