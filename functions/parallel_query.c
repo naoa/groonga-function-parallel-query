@@ -523,6 +523,11 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
     }
     grn_hash_cursor_close(ctx, cursor);
   }
+  if (separate_query && digit_format > 0) {
+    GRN_PLUGIN_ERROR(ctx, GRN_INVALID_ARGUMENT, "not supported");
+    rc = ctx->rc;
+    goto exit;
+  }
 
   if (top_n > 0 && op != GRN_OP_OR) {
     top_n = 0;
@@ -602,6 +607,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
       qa[n].top_n_sort_keys_length = top_n_sort_keys_length;
       qa[n].op = op;
       qa[n].main = (n == 0 && top_n == 0 && op == GRN_OP_OR) ? GRN_TRUE : GRN_FALSE;
+
       qa[n].m = &m;
 
       ret = pthread_create(&threads[n], NULL, (void *)thread_query, (void *) &qa[n]);
@@ -612,7 +618,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
         goto exit;
       }
       n++;
-      if (n == n_worker || i >= n_query_args - 2) {
+      if (n == n_worker || i >= col_size - 1) {
         for (t = 0; t < n; t++) {
           ret = pthread_join(threads[t], NULL);
           if (ret != 0) {
