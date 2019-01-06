@@ -572,7 +572,11 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
         for (j = 0; j < digit_format; j++) {
           GRN_BULK_REWIND(&str_buf);
           GRN_TEXT_SET(ctx, &str_buf, match_columns_string, match_columns_string_length);
-          replace_char(GRN_TEXT_VALUE(&str_buf), GRN_TEXT_LEN(&str_buf), '%', '1' + j);
+         if (j < 9) {
+            replace_char(GRN_TEXT_VALUE(&str_buf), GRN_TEXT_LEN(&str_buf), '%', '1' + j);
+          } else {
+            replace_char(GRN_TEXT_VALUE(&str_buf), GRN_TEXT_LEN(&str_buf), '%', 'X' + j);
+          }
           grn_vector_add_element(ctx, &parsed_match_columns_strings, GRN_TEXT_VALUE(&str_buf), GRN_TEXT_LEN(&str_buf), 0, GRN_DB_TEXT);
         }
       } else {
