@@ -27,7 +27,7 @@
 # define GNUC_UNUSED
 #endif
 
-int n_worker = 12;
+int n_worker = 16;
 
 /* copy from lib/grn_rset.h */
 
