@@ -375,7 +375,6 @@ thread_query(void *p)
       goto exit;
     }
 
-    ctx->flags |= GRN_CTX_TEMPORARY_DISABLE_II_RESOLVE_SEL_AND;
     if (ip->main) {
       ret = pthread_mutex_lock(ip->m);
       if (ret != 0) {
@@ -532,6 +531,9 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
   if (top_n > 0 && op != GRN_OP_OR) {
     top_n = 0;
   }
+
+  int original_flags = ctx->flags;
+  ctx->flags |= GRN_CTX_TEMPORARY_DISABLE_II_RESOLVE_SEL_AND;
 
   if (top_n > 0) {
     merge_res = grn_table_create(ctx, NULL, 0, NULL,
@@ -697,7 +699,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
     grn_obj_unlink(ctx, sorted);
   }
 
-  ctx->flags &= ~GRN_CTX_TEMPORARY_DISABLE_II_RESOLVE_SEL_AND;
+  ctx->flags = original_flags;
   grn_ii_resolve_sel_and_(ctx, (grn_hash *)res, op);
 
 exit :
