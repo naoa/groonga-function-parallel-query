@@ -474,6 +474,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
   const char *top_n_sort_keys = "-_score";
   unsigned int top_n_sort_keys_length = 7;
   int digit_format = 0;
+  int sub_digit_format = 0;
   grn_obj *merge_res = NULL;
   pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
 
@@ -512,6 +513,8 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
         top_n_sort_keys_length = GRN_TEXT_LEN(value);
       } else if (key_size == 12 && !memcmp(key, "digit_format", 12)) {
         digit_format = GRN_INT32_VALUE(value);
+      } else if (key_size == 16 && !memcmp(key, "sub_digit_format", 16)) {
+        sub_digit_format = GRN_INT32_VALUE(value);
       } else {
         GRN_PLUGIN_ERROR(ctx, GRN_INVALID_ARGUMENT,
                          "invalid option name: <%.*s>",
@@ -559,7 +562,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
     }
 #undef QUERY_SET_SIZE
   }
-  if (digit_format > 0) {
+  if (digit_format > 0 || sub_digit_format > 0) {
     grn_obj parsed_match_columns_strings;
     GRN_TEXT_INIT(&parsed_match_columns_strings, GRN_OBJ_VECTOR);
     for (i = 0; i < (int)grn_vector_size(ctx, &match_columns_strings); i++) {
@@ -569,7 +572,19 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
       match_columns_string_length = grn_vector_get_element(ctx, &match_columns_strings, i, &match_columns_string, NULL, NULL);
       GRN_TEXT_INIT(&str_buf, 0);
       GRN_TEXT_SET(ctx, &str_buf, match_columns_string, match_columns_string_length);
-      if (strchr(match_columns_string, '%')) {
+      if (sub_digit_format > 0 && strchr(match_columns_string, '$')) {
+        int j;
+        for (j = 0; j < sub_digit_format; j++) {
+          GRN_BULK_REWIND(&str_buf);
+          GRN_TEXT_SET(ctx, &str_buf, match_columns_string, match_columns_string_length);
+         if (j < 9) {
+            replace_char(GRN_TEXT_VALUE(&str_buf), GRN_TEXT_LEN(&str_buf), '$', '1' + j);
+          } else {
+            replace_char(GRN_TEXT_VALUE(&str_buf), GRN_TEXT_LEN(&str_buf), '$', 'X' + j);
+          }
+          grn_vector_add_element(ctx, &parsed_match_columns_strings, GRN_TEXT_VALUE(&str_buf), GRN_TEXT_LEN(&str_buf), 0, GRN_DB_TEXT);
+        }
+      } else if (digit_format > 0 && strchr(match_columns_string, '%')) {
         int j;
         for (j = 0; j < digit_format; j++) {
           GRN_BULK_REWIND(&str_buf);
