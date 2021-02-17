@@ -300,6 +300,7 @@ typedef struct {
   unsigned int top_n;
   const char *top_n_sort_keys;
   unsigned int top_n_sort_keys_length;
+  long long int match_escalation_threshold;
   pthread_mutex_t *m;
 } thread_query_args;
 
@@ -331,6 +332,9 @@ thread_query(void *p)
     goto exit;
   }
   grn_ctx_use(ctx, ip->db);
+
+  grn_ctx_set_match_escalation_threshold(ctx, ip->match_escalation_threshold);
+
 
   if (match_columns_string_length > 0) {
 
@@ -534,6 +538,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
   if (top_n > 0 && op != GRN_OP_OR) {
     top_n = 0;
   }
+  long long int threshold = grn_ctx_get_match_escalation_threshold(ctx);
 
   int original_flags = ctx->flags;
   ctx->flags |= GRN_CTX_TEMPORARY_DISABLE_II_RESOLVE_SEL_AND;
@@ -629,6 +634,8 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
       qa[n].op = op;
       qa[n].main = (n == 0 && top_n == 0 && op == GRN_OP_OR) ? GRN_TRUE : GRN_FALSE;
 
+      qa[n].match_escalation_threshold = threshold;
+
       qa[n].m = &m;
 
       ret = pthread_create(&threads[n], NULL, (void *)thread_query, (void *) &qa[n]);
@@ -672,6 +679,7 @@ run_parallel_query(grn_ctx *ctx, grn_obj *table,
       qa[n].top_n_sort_keys_length = top_n_sort_keys_length;
       qa[n].op = op;
       qa[n].main = (n == 0 && top_n == 0 && op == GRN_OP_OR) ? GRN_TRUE : GRN_FALSE;
+      qa[n].match_escalation_threshold = threshold;
       qa[n].m = &m;
 
       ret = pthread_create(&threads[n], NULL, (void *)thread_query, (void *) &qa[n]);
